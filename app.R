@@ -17,53 +17,62 @@ extract_homo_lumo <- function(logfile) {
     }
   }
   
-  if (length(homo_values) > 0) {
-    homo <- tail(homo_values, 1)
-  } else {
-    homo <- NA
-  }
-  if (length(lumo_values) > 0) {
-    lumo <- head(lumo_values, 1)
-  } else {
-    lumo <- NA
-  }
+  homo <- ifelse(length(homo_values) > 0, tail(homo_values, 1), NA)
+  lumo <- ifelse(length(lumo_values) > 0, head(lumo_values, 1), NA)
   
   return(list(HOMO = homo, LUMO = lumo))
 }
 
-# Function to extract vibrational frequencies and thermodynamic properties
-extract_vibrations <- function(logfile) {
+# Function to extract dipole moment and polarizability
+dipole_polarizability <- function(logfile) {
   lines <- readLines(logfile)
-  freqs <- c()
-  enthalpy <- NA
-  gibbs <- NA
+  dipole <- NA
+  polarizability <- NA
   
   for (i in seq_along(lines)) {
-    if (grepl("Frequencies --", lines[i])) {
-      values <- as.numeric(unlist(strsplit(trimws(lines[i]), "[[:space:]]+"))[3:5])
-      freqs <- c(freqs, values)
+    if (grepl("Dipole moment", lines[i])) {
+      dipole <- as.numeric(unlist(strsplit(trimws(lines[i]), "[[:space:]]+"))[4])
     }
+    if (grepl("Isotropic polarizability", lines[i])) {
+      polarizability <- as.numeric(unlist(strsplit(trimws(lines[i]), "[[:space:]]+"))[4])
+    }
+  }
+  
+  return(list(Dipole = dipole, Polarizability = polarizability))
+}
+
+# Function to extract thermodynamic properties
+extract_thermo <- function(logfile) {
+  lines <- readLines(logfile)
+  enthalpy <- NA
+  gibbs <- NA
+  entropy <- NA
+  
+  for (i in seq_along(lines)) {
     if (grepl("Enthalpy=", lines[i])) {
       enthalpy <- as.numeric(unlist(strsplit(trimws(lines[i]), "[[:space:]]+"))[2])
     }
     if (grepl("Gibbs Free Energy=", lines[i])) {
       gibbs <- as.numeric(unlist(strsplit(trimws(lines[i]), "[[:space:]]+"))[4])
     }
+    if (grepl("Entropy=", lines[i])) {
+      entropy <- as.numeric(unlist(strsplit(trimws(lines[i]), "[[:space:]]+"))[2])
+    }
   }
   
-  return(list(Frequencies = freqs, Enthalpy = enthalpy, Gibbs = gibbs))
+  return(list(Enthalpy = enthalpy, Gibbs = gibbs, Entropy = entropy))
 }
 
 # Function to compute derived properties
 calculate_properties <- function(homo, lumo) {
-  Eg <- lumo - homo  # Energy gap
-  IE <- -homo        # Ionization potential
-  EA <- -lumo        # Electron affinity
-  chi <- (IE + EA) / 2  # Electronegativity
-  mu <- -chi         # Electrochemical potential
-  eta <- Eg / 2      # Hardness
-  sigma <- 1 / eta   # Softness
-  omega <- chi^2 / (2 * eta)  # Electrophilicity Index
+  Eg <- lumo - homo
+  IE <- -homo
+  EA <- -lumo
+  chi <- (IE + EA) / 2
+  mu <- -chi
+  eta <- Eg / 2
+  sigma <- 1 / eta
+  omega <- chi^2 / (2 * eta)
   
   return(list(Eg = Eg, IE = IE, EA = EA, chi = chi, mu = mu, eta = eta, sigma = sigma, omega = omega))
 }
@@ -77,7 +86,8 @@ ui <- fluidPage(
     ),
     mainPanel(
       tableOutput("results"),
-      tableOutput("vibrations")
+      tableOutput("thermo"),
+      tableOutput("dipole")
     )
   )
 )
@@ -86,7 +96,6 @@ ui <- fluidPage(
 server <- function(input, output) {
   output$results <- renderTable({
     req(input$file)
-    
     log_data <- extract_homo_lumo(input$file$datapath)
     
     if (is.na(log_data$HOMO) || is.na(log_data$LUMO)) {
@@ -105,13 +114,24 @@ server <- function(input, output) {
     return(results)
   })
   
-  output$vibrations <- renderTable({
+  output$thermo <- renderTable({
     req(input$file)
-    vib_data <- extract_vibrations(input$file$datapath)
+    thermo_data <- extract_thermo(input$file$datapath)
     
     results <- data.frame(
-      Property = c("First 3 Vibrational Frequencies (cm-1)", "Enthalpy (Hartree)", "Gibbs Free Energy (Hartree)"),
-      Value = c(paste(vib_data$Frequencies, collapse = ", "), vib_data$Enthalpy, vib_data$Gibbs)
+      Property = c("Enthalpy (Hartree)", "Gibbs Free Energy (Hartree)", "Entropy (cal/mol-K)"),
+      Value = c(thermo_data$Enthalpy, thermo_data$Gibbs, thermo_data$Entropy)
+    )
+    return(results)
+  })
+  
+  output$dipole <- renderTable({
+    req(input$file)
+    dipole_data <- dipole_polarizability(input$file$datapath)
+    
+    results <- data.frame(
+      Property = c("Dipole Moment (Debye)", "Polarizability (a.u.)"),
+      Value = c(dipole_data$Dipole, dipole_data$Polarizability)
     )
     return(results)
   })
